@@ -2,13 +2,14 @@
 import { useRouter } from "next/router";
 import { useEffect, useState, useMemo } from "react";
 
-const INCIDENTS_STORAGE_KEY = "CORA_incidents_v1";
+const INCIDENTS_KEY = "CORA_incidents_v1";
 
 export default function IncidentDetailPage() {
   const router = useRouter();
   const { id } = router.query;
 
   const [incident, setIncident] = useState(null);
+  const [loaded, setLoaded] = useState(false);
   const [banner, setBanner] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
 
@@ -17,16 +18,16 @@ export default function IncidentDetailPage() {
     if (!id || typeof window === "undefined") return;
 
     try {
-      const stored = window.localStorage.getItem(INCIDENTS_STORAGE_KEY);
+      const stored = window.localStorage.getItem(INCIDENTS_KEY);
       const parsed = stored ? JSON.parse(stored) : [];
-      if (!Array.isArray(parsed)) return;
-
-      const match = parsed.find((i) => i.id === id);
-      if (match) {
-        setIncident(match);
-      }
+      const match = Array.isArray(parsed)
+        ? parsed.find((i) => i.id === id)
+        : null;
+      setIncident(match || null);
+      setLoaded(true);
     } catch (err) {
       console.error("Failed to load incident", err);
+      setLoaded(true);
     }
   }, [id]);
 
@@ -43,7 +44,7 @@ export default function IncidentDetailPage() {
     setIsUpdating(true);
 
     try {
-      const stored = window.localStorage.getItem(INCIDENTS_STORAGE_KEY);
+      const stored = window.localStorage.getItem(INCIDENTS_KEY);
       const parsed = stored ? JSON.parse(stored) : [];
 
       const updatedIncident = {
@@ -56,7 +57,7 @@ export default function IncidentDetailPage() {
         : [updatedIncident];
 
       window.localStorage.setItem(
-        INCIDENTS_STORAGE_KEY,
+        INCIDENTS_KEY,
         JSON.stringify(updatedList)
       );
       setIncident(updatedIncident);
@@ -76,46 +77,48 @@ export default function IncidentDetailPage() {
     }
   };
 
+  // --- Decision handlers ---
   const handleApproveAndWhitelist = () => {
     if (!incident) return;
+
     const newStatus = "Allowlisted upload";
     const newType = "Approved uploader";
     const newAuth =
-      incident.authenticity === "Synthetic / spoof suspected"
-        ? "Real asset detected"
-        : incident.authenticity || "Real asset detected";
+      incident.authenticityLabel && incident.authenticityLabel.length > 0
+        ? incident.authenticityLabel
+        : "Verified original (marker confirmed)";
 
     updateIncidentAndPersist(
       {
         status: newStatus,
-        type: newType,
-        authenticity: newAuth,
+        typeLabel: newType,
+        authenticityLabel: newAuth,
+        isSpoofSuspected: false,
+        spoofCategory: null,
       },
-      "Uploader approved and allowlisted. Future hits from this source will be treated as trusted by default."
+      "Uploader approved and added to allowlist. Future hits from this source will be treated as trusted by default."
     );
   };
 
   const handleKeepEnforcement = () => {
     if (!incident) return;
-    const newStatus = "Pending enforcement";
 
     updateIncidentAndPersist(
       {
-        status: newStatus,
+        status: "Pending enforcement",
       },
-      "Enforcement left active. CORA will continue to treat this as an unauthorized capture."
+      "Enforcement left active. CORA will continue to treat this as an unauthorized or unverified capture."
     );
   };
 
   const handleFileTakedown = () => {
     if (!incident) return;
-    const newStatus = "Escalated – takedown filed";
 
     updateIncidentAndPersist(
       {
-        status: newStatus,
+        status: "Escalated – takedown filed",
       },
-      "Takedown triggered. CORA will notify the uploader and file a platform complaint on your behalf."
+      "Takedown triggered. CORA will escalate and file a platform complaint on your behalf."
     );
   };
 
@@ -123,52 +126,105 @@ export default function IncidentDetailPage() {
   const handleGoHome = () => router.push("/");
   const handleGoAllowlist = () => router.push("/settings/allowlist");
 
-  // Deepfake comparison image config (for G700, villa, etc.)
-  const comparisonConfig = useMemo(() => {
-    if (!incident) return null;
-
-    const name = (incident.assetName || "").toLowerCase();
-
-    if (name.includes("g700") || name.includes("gulfstream")) {
-      return {
-        label: "Gulfstream G700 – reference vs suspected spoof",
-        referenceSrc: "/assets-reference/g700-reference.jpg",
-        hitSrc: "/assets-reference/g700-suspect.jpg",
-      };
+  // --- Spoof / deepfake explanation text ---
+  const renderSpoofExplanation = () => {
+    if (!incident?.isSpoofSuspected) {
+      return (
+        <p
+          style={{
+            fontSize: "0.86rem",
+            lineHeight: 1.6,
+            color: "rgba(226,232,240,0.96)",
+          }}
+        >
+          This capture does not show clear spoof indicators. It is still treated
+          as <strong>unverified</strong> unless you or a trusted reviewer mark
+          it as allowed.
+        </p>
+      );
     }
 
-    if (name.includes("villa") || name.includes("residence")) {
-      return {
-        label: "Residence – reference vs suspected spoof",
-        referenceSrc: "/assets-reference/villa-reference.jpg",
-        hitSrc: "/assets-reference/villa-suspect.jpg",
-      };
+    if (incident.spoofCategory === "ai_generated") {
+      return (
+        <p
+          style={{
+            fontSize: "0.86rem",
+            lineHeight: 1.6,
+            color: "rgba(226,232,240,0.96)",
+          }}
+        >
+          The system is treating this as a likely{" "}
+          <strong>AI-generated rendering</strong> of the jet. The marker and
+          tail number appear in-frame, but lighting, reflections and surface
+          detail match a 3D render more than a real photograph. The incident is
+          surfaced as <strong>high-risk</strong> and is a strong candidate for
+          takedown.
+        </p>
+      );
     }
 
-    return null;
-  }, [incident]);
+    if (incident.spoofCategory === "marker_mismatch") {
+      return (
+        <p
+          style={{
+            fontSize: "0.86rem",
+            lineHeight: 1.6,
+            color: "rgba(226,232,240,0.96)",
+          }}
+        >
+          The marker ID matches a registered Lake Como villa, but the structure
+          and surroundings in this frame do not match the reference imagery.
+          This suggests the marker has been{" "}
+          <strong>reused or spoofed on a different property</strong>. The
+          incident should be escalated before allowing the content to stay up.
+        </p>
+      );
+    }
+
+    return (
+      <p
+        style={{
+          fontSize: "0.86rem",
+          lineHeight: 1.6,
+          color: "rgba(226,232,240,0.96)",
+        }}
+      >
+        The system flagged this as suspicious. A human reviewer should confirm
+        whether to enforce, allow, or keep monitoring.
+      </p>
+    );
+  };
+
+  // --- Deepfake comparison images (from incident data) ---
+  const hasComparisonImages =
+    incident?.referenceOriginal && incident?.referenceSuspect;
 
   const shouldShowComparison =
-    incident &&
-    incident.authenticity === "Synthetic / spoof suspected" &&
-    comparisonConfig;
+    !!incident &&
+    !!incident.isSpoofSuspected &&
+    !!hasComparisonImages;
 
-  // Instagram-style verified preview:
-  // Only show when platform is Instagram AND authenticity is "Real asset detected".
+  // --- Instagram-style verified preview ---
   const showVerifiedPreview =
-    incident &&
+    !!incident &&
     incident.platform === "Instagram" &&
-    incident.authenticity === "Real asset detected";
+    ((incident.authenticityLabel &&
+      incident.authenticityLabel.toLowerCase().includes("verified original")) ||
+      (incident.status &&
+        incident.status.toLowerCase().includes("allowlisted upload")) ||
+      (incident.status &&
+        incident.status.toLowerCase().includes("allowed – verified original")));
 
   const previewHandle = useMemo(() => {
     if (!incident) return "@unknown";
-    if (incident.uploader && incident.uploader.trim().length > 0) {
-      return incident.uploader.startsWith("@")
-        ? incident.uploader
-        : `@${incident.uploader}`;
-    }
-    return "@unknown";
+    const src = incident.uploader || incident.uploaderHandle || "@unknown";
+    if (!src) return "@unknown";
+    return src.startsWith("@") ? src : `@${src}`;
   }, [incident]);
+
+  if (!loaded) {
+    return null;
+  }
 
   if (!incident) {
     return (
@@ -215,14 +271,32 @@ export default function IncidentDetailPage() {
               color: "rgba(203,213,225,0.9)",
             }}
           >
-            This incident ID was not found in local storage. Try reopening the
-            monitoring dashboard and selecting an incident again.
+            This incident ID was not found in local storage. Reopen the
+            monitoring dashboard and select an incident again.
           </p>
         </div>
       </main>
     );
   }
 
+  // --- Derived labels with fallbacks to older keys, just in case ---
+  const assetName = incident.assetName || "Registered asset";
+  const platform = incident.platform || "Unknown platform";
+  const uploader = incident.uploader || incident.uploaderHandle || "Unknown";
+  const status = incident.status || "Status unknown";
+  const typeLabel = incident.typeLabel || incident.type || "Unknown type";
+  const authenticityLabel =
+    incident.authenticityLabel ||
+    incident.authenticity ||
+    "Authenticity unknown";
+  const timeLabel = incident.timeLabel || "Just now";
+  const markerId = incident.markerId || incident.id || "Unspecified";
+  const sourceUrl = incident.sourceUrl || incident.link || null;
+  const realityCheckLabel =
+    incident.realityCheckLabel ||
+    "Marker, geometry and context are evaluated to decide whether this is real footage or a synthetic spoof.";
+
+  // Chip styles
   const chipBase = {
     display: "inline-flex",
     alignItems: "center",
@@ -234,7 +308,7 @@ export default function IncidentDetailPage() {
   };
 
   const typeColor =
-    incident.type === "Approved uploader"
+    typeLabel === "Approved uploader"
       ? {
           border: "1px solid rgba(34,197,94,0.7)",
           color: "rgba(22,163,74,0.95)",
@@ -247,7 +321,8 @@ export default function IncidentDetailPage() {
         };
 
   const authColor =
-    incident.authenticity === "Synthetic / spoof suspected"
+    authenticityLabel.toLowerCase().includes("synthetic") ||
+    authenticityLabel.toLowerCase().includes("spoof")
       ? {
           border: "1px solid rgba(248,113,113,0.7)",
           color: "rgba(248,113,113,0.95)",
@@ -260,13 +335,13 @@ export default function IncidentDetailPage() {
         };
 
   let statusColor;
-  if (incident.status === "Allowlisted upload") {
+  if (status === "Allowlisted upload" || status === "Allowed – verified original") {
     statusColor = {
       border: "1px solid rgba(34,197,94,0.7)",
       color: "rgba(34,197,94,0.95)",
       background: "rgba(22,163,74,0.18)",
     };
-  } else if (incident.status === "Escalated – takedown filed") {
+  } else if (status === "Escalated – takedown filed") {
     statusColor = {
       border: "1px solid rgba(248,113,113,0.7)",
       color: "rgba(248,113,113,0.95)",
@@ -292,6 +367,7 @@ export default function IncidentDetailPage() {
         color: "white",
       }}
     >
+      {/* Top bar */}
       <header
         style={{
           maxWidth: "1120px",
@@ -331,8 +407,7 @@ export default function IncidentDetailPage() {
                 opacity: 0.65,
               }}
             >
-              {incident.assetName} · {incident.platform} ·{" "}
-              {incident.ageLabel || "recent"}
+              {assetName} · {platform} · {timeLabel}
             </div>
           </div>
         </div>
@@ -360,6 +435,7 @@ export default function IncidentDetailPage() {
           alignItems: "flex-start",
         }}
       >
+        {/* LEFT COLUMN – Summary + spoof analysis */}
         <div>
           {banner && (
             <div
@@ -383,6 +459,7 @@ export default function IncidentDetailPage() {
             </div>
           )}
 
+          {/* Incident summary */}
           <div
             style={{
               borderRadius: "1rem",
@@ -418,7 +495,7 @@ export default function IncidentDetailPage() {
                     fontWeight: 500,
                   }}
                 >
-                  {incident.assetName}
+                  {assetName}
                 </div>
                 <div
                   style={{
@@ -428,9 +505,9 @@ export default function IncidentDetailPage() {
                   }}
                 >
                   Marker ID:{" "}
-                    <span style={{ color: "rgba(129,140,248,0.95)" }}>
-                      {incident.id}
-                    </span>
+                  <span style={{ color: "rgba(129,140,248,0.95)" }}>
+                    {markerId}
+                  </span>
                 </div>
               </div>
 
@@ -441,16 +518,16 @@ export default function IncidentDetailPage() {
                   color: "rgba(148,163,184,0.95)",
                 }}
               >
-                <div>{incident.platform}</div>
-                {incident.uploader && (
+                <div>{platform}</div>
+                {uploader && (
                   <div style={{ marginTop: "0.15rem" }}>
                     Uploader:{" "}
                     <span style={{ color: "rgba(226,232,240,0.95)" }}>
-                      {incident.uploader}
+                      {uploader}
                     </span>
                   </div>
                 )}
-                {incident.link && (
+                {sourceUrl && (
                   <div
                     style={{
                       marginTop: "0.15rem",
@@ -458,7 +535,7 @@ export default function IncidentDetailPage() {
                     }}
                   >
                     <a
-                      href={incident.link}
+                      href={sourceUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{
@@ -466,7 +543,7 @@ export default function IncidentDetailPage() {
                         textDecoration: "none",
                       }}
                     >
-                      Open source link ↗
+                      Open source post ↗
                     </a>
                   </div>
                 )}
@@ -483,56 +560,71 @@ export default function IncidentDetailPage() {
               }}
             >
               <span style={{ ...chipBase, ...typeColor }}>
-                {incident.type || "Unknown type"}
+                {typeLabel || "Unknown type"}
               </span>
               <span style={{ ...chipBase, ...authColor }}>
-                {incident.authenticity || "Authenticity unknown"}
+                {authenticityLabel}
               </span>
               <span style={{ ...chipBase, ...statusColor }}>
-                {incident.status || "Status unknown"}
+                {status}
               </span>
             </div>
-          </div>
 
-          {/* Deepfake / spoof comparison */}
-          {shouldShowComparison && (
-            <div
-              style={{
-                borderRadius: "1rem",
-                border: "1px solid rgba(56,189,248,0.8)",
-                background:
-                  "linear-gradient(135deg, rgba(8,47,73,0.9), rgba(15,23,42,0.95))",
-                padding: "1rem 1.1rem 1.1rem",
-                marginBottom: "1rem",
-              }}
-            >
-              <div
+            {/* Notes */}
+            {incident.incidentNotes && (
+              <p
                 style={{
-                  fontSize: "0.8rem",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.16em",
-                  color: "rgba(125,211,252,0.95)",
-                  marginBottom: "0.4rem",
-                }}
-              >
-                Deepfake / spoof analysis
-              </div>
-              <div
-                style={{
-                  fontSize: "0.88rem",
-                  color: "rgba(226,232,240,0.95)",
-                  marginBottom: "0.7rem",
+                  marginTop: "0.7rem",
+                  marginBottom: 0,
+                  fontSize: "0.86rem",
+                  color: "rgba(203,213,225,0.96)",
                   lineHeight: 1.6,
                 }}
               >
-                CORA is comparing the flagged image against a known reference of
-                this asset. Visual markers, geometry and lighting patterns are
-                used to score whether this is likely real footage or a synthetic
-                spoof.
-              </div>
+                {incident.incidentNotes}
+              </p>
+            )}
+          </div>
 
+          {/* Deepfake / spoof analysis */}
+          <div
+            style={{
+              borderRadius: "1rem",
+              border: "1px solid rgba(56,189,248,0.8)",
+              background:
+                "linear-gradient(135deg, rgba(8,47,73,0.9), rgba(15,23,42,0.95))",
+              padding: "1rem 1.1rem 1.1rem",
+              marginBottom: "1rem",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "0.8rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.16em",
+                color: "rgba(125,211,252,0.95)",
+                marginBottom: "0.4rem",
+              }}
+            >
+              Reality check & spoof analysis
+            </div>
+            <p
+              style={{
+                fontSize: "0.82rem",
+                color: "rgba(148,163,184,0.95)",
+                marginBottom: "0.4rem",
+                lineHeight: 1.6,
+              }}
+            >
+              {realityCheckLabel}
+            </p>
+
+            {renderSpoofExplanation()}
+
+            {shouldShowComparison && (
               <div
                 style={{
+                  marginTop: "0.9rem",
                   display: "grid",
                   gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
                   gap: "0.75rem",
@@ -567,7 +659,7 @@ export default function IncidentDetailPage() {
                     }}
                   >
                     <img
-                      src={comparisonConfig.referenceSrc}
+                      src={incident.referenceOriginal}
                       alt="Registered reference asset"
                       style={{
                         maxWidth: "100%",
@@ -607,7 +699,7 @@ export default function IncidentDetailPage() {
                     }}
                   >
                     <img
-                      src={comparisonConfig.hitSrc}
+                      src={incident.referenceSuspect}
                       alt="Flagged suspected spoof"
                       style={{
                         maxWidth: "100%",
@@ -618,10 +710,38 @@ export default function IncidentDetailPage() {
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Enforcement summary */}
+            {typeof incident.deepfakeRiskScore === "number" && (
+              <div
+                style={{
+                  marginTop: "0.9rem",
+                  fontSize: "0.82rem",
+                  color: "rgba(226,232,240,0.96)",
+                }}
+              >
+                <div
+                  style={{
+                    textTransform: "uppercase",
+                    letterSpacing: "0.12em",
+                    fontSize: "0.75rem",
+                    color: "rgba(148,163,184,0.95)",
+                    marginBottom: "0.15rem",
+                  }}
+                >
+                  Risk score
+                </div>
+                <div>
+                  {incident.deepfakeRiskScore}/100{" "}
+                  <span style={{ color: "rgba(148,163,184,0.95)" }}>
+                    (higher means more likely synthetic or misused)
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Enforcement summary copy */}
           <div
             style={{
               borderRadius: "1rem",
@@ -679,7 +799,7 @@ export default function IncidentDetailPage() {
           </div>
         </div>
 
-        {/* Right – Decision console + Instagram-style preview */}
+        {/* RIGHT COLUMN – Decision console + IG preview */}
         <div
           style={{
             display: "grid",
@@ -793,9 +913,7 @@ export default function IncidentDetailPage() {
                 Current status
               </div>
               <div>
-                <strong>{incident.status}</strong> ·{" "}
-                {incident.type || "Unknown type"} ·{" "}
-                {incident.authenticity || "Authenticity unknown"}
+                <strong>{status}</strong> · {typeLabel} · {authenticityLabel}
               </div>
               <div style={{ marginTop: "0.35rem" }}>
                 To manage trusted uploaders globally, use the allowlist
@@ -815,7 +933,7 @@ export default function IncidentDetailPage() {
             </div>
           </div>
 
-          {/* Instagram-style "verified post" preview */}
+          {/* Instagram-style verified preview */}
           {showVerifiedPreview && (
             <div
               style={{

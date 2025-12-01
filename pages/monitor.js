@@ -14,6 +14,34 @@ function createSeedIncidents() {
   };
 
   return [
+    // 1) VERIFIED Instagram post – marker + geometry match, treated as original
+    {
+      id: "INC-VERIFIED-IG-1",
+      assetName: "Lake Como Villa – Pool Level",
+      platform: "Instagram",
+      uploader: "@housemanager_como",
+      uploaderHandle: "@housemanager_como",
+      markerId: "CORA-LAKECOMO-POOL-001",
+      contentType: "Photo",
+      sourceUrl: "https://instagram.com/p/verified-demo",
+      detectedAt: daysAgo(0),
+      timeLabel: "Today · 09:17 AM",
+      status: "Allowed – verified original",
+      typeLabel: "Owner-approved content",
+      authenticityLabel: "Verified original (marker confirmed)",
+      realityCheckLabel:
+        "Marker and villa geometry match registered reference – content treated as original.",
+      isSpoofSuspected: false,
+      spoofCategory: null,
+      deepfakeRiskScore: 5,
+      incidentNotes:
+        "Posted by a whitelisted house manager account. Marker and architecture match the pool-side reference imagery.",
+      referenceOriginal: "/assets-reference/villa-reference.jpg",
+      referenceSuspect: null,
+      createdBySimulation: false,
+    },
+
+    // 2) Lake Como villa – marker reused on wrong property (spoof)
     {
       id: "INC-1001",
       assetName: "Lake Como Villa – North Terrace",
@@ -28,12 +56,19 @@ function createSeedIncidents() {
       status: "Flagged – awaiting review",
       typeLabel: "Potential unauthorized capture",
       authenticityLabel: "Unverified",
-      realityCheckLabel: "Original – spoof not evaluated",
-      isSpoofSuspected: false,
-      deepfakeRiskScore: 12,
-      incidentNotes: "Terrace shot, partial lake visible. Guests in frame.",
+      realityCheckLabel:
+        "Marker seen on a different property – likely spoof or misuse of the CORA marker.",
+      isSpoofSuspected: true,
+      spoofCategory: "marker_mismatch",
+      deepfakeRiskScore: 67,
+      incidentNotes:
+        "Marker ID matches the registered Lake Como villa, but architecture and surroundings do not match the reference images.",
+      referenceOriginal: "/assets-reference/villa-reference.jpg",
+      referenceSuspect: "/assets-reference/villa-suspect.jpg",
       createdBySimulation: false,
     },
+
+    // 3) G700 – AI-generated / deepfake style spoof
     {
       id: "INC-1002",
       assetName: "Gulfstream G700 – tail N777PV",
@@ -48,31 +83,15 @@ function createSeedIncidents() {
       status: "Flagged – awaiting review",
       typeLabel: "Press / editorial",
       authenticityLabel: "Unverified",
-      realityCheckLabel: "Spoof suspected – tail mismatch",
+      realityCheckLabel:
+        "AI-style rendering – marker appears, but aircraft is synthetic.",
       isSpoofSuspected: true,
-      deepfakeRiskScore: 78,
+      spoofCategory: "ai_generated",
+      deepfakeRiskScore: 92,
       incidentNotes:
-        "Tail art and hangar background mismatch registry. Likely stock or composite.",
-      createdBySimulation: false,
-    },
-    {
-      id: "INC-1003",
-      assetName: "Soho flat – interior library",
-      platform: "TikTok",
-      uploader: "@designinspo_daily",
-      uploaderHandle: "@designinspo_daily",
-      markerId: "CORA-SOHO-INT-044",
-      contentType: "Video",
-      sourceUrl: "https://tiktok.com/@designinspo_daily/video/demo",
-      detectedAt: daysAgo(7),
-      timeLabel: "Last week · Fri 10:05 AM",
-      status: "Flagged – awaiting review",
-      typeLabel: "Interior content",
-      authenticityLabel: "Unverified",
-      realityCheckLabel: "Original – spoof not evaluated",
-      isSpoofSuspected: false,
-      deepfakeRiskScore: 24,
-      incidentNotes: "Full room walkthrough, shelves & art wall fully visible.",
+        "Tail number and marker are present, but lighting, reflections and surface detail match a rendered model, not the registered reference photography.",
+      referenceOriginal: "/assets-reference/g700-reference.jpg",
+      referenceSuspect: "/assets-reference/g700-suspect.jpg",
       createdBySimulation: false,
     },
   ];
